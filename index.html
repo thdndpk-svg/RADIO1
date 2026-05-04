@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#101827" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="한국 라디오" />
+  <title>한국 라디오</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg1: #101827;
+      --bg2: #18243a;
+      --card: rgba(255,255,255,.10);
+      --card2: rgba(255,255,255,.16);
+      --line: rgba(255,255,255,.18);
+      --text: #f7fbff;
+      --muted: rgba(247,251,255,.72);
+      --gold: #ffd479;
+      --pink: #ff8fab;
+      --blue: #8bd3ff;
+      --green: #92f2b8;
+      --danger: #ff6b6b;
+      --shadow: 0 24px 70px rgba(0,0,0,.35);
+      --radius: 26px;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg1); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", Segoe UI, sans-serif; }
+    body {
+      background:
+        radial-gradient(circle at 10% 10%, rgba(255,212,121,.24), transparent 28%),
+        radial-gradient(circle at 92% 10%, rgba(139,211,255,.20), transparent 32%),
+        radial-gradient(circle at 50% 100%, rgba(255,143,171,.18), transparent 30%),
+        linear-gradient(160deg, var(--bg1), var(--bg2) 58%, #0b101d);
+      padding: env(safe-area-inset-top) 14px env(safe-area-inset-bottom);
+    }
+
+    .app {
+      width: min(960px, 100%);
+      margin: 0 auto;
+      padding: 18px 0 26px;
+    }
+
+    .hero {
+      padding: 20px 18px 16px;
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(255,255,255,.14), rgba(255,255,255,.06));
+      border-radius: 32px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      position: sticky;
+      top: max(10px, env(safe-area-inset-top));
+      z-index: 5;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+    }
+
+    .logo {
+      width: 46px;
+      height: 46px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, var(--gold), #ff9f68);
+      color: #1b1200;
+      font-size: 25px;
+      box-shadow: 0 12px 26px rgba(255, 188, 77, .25);
+      flex: 0 0 auto;
+    }
+
+    h1 { margin: 0; font-size: 22px; letter-spacing: -.6px; }
+    .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.08);
+      padding: 8px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .now {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .now-title {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: -.3px;
+    }
+
+    .now-meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 2px;
+    }
+
+    audio {
+      width: 100%;
+      height: 42px;
+      border-radius: 20px;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+      margin-top: 2px;
+    }
+
+    button, .open-link {
+      appearance: none;
+      border: 0;
+      border-radius: 18px;
+      min-height: 46px;
+      padding: 12px 14px;
+      font-weight: 800;
+      font-size: 14px;
+      color: var(--text);
+      background: rgba(255,255,255,.12);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      display: grid;
+      place-items: center;
+    }
+
+    button.primary {
+      color: #1a1303;
+      background: linear-gradient(145deg, var(--gold), #ffb55b);
+      border: 0;
+    }
+
+    button:active, .station:active, .chip:active, .open-link:active { transform: scale(.985); }
+
+    .search-wrap {
+      margin: 14px 0 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .search {
+      width: 100%;
+      border: 1px solid var(--line);
+      outline: none;
+      background: rgba(255,255,255,.10);
+      color: var(--text);
+      border-radius: 20px;
+      padding: 14px 15px;
+      font-size: 15px;
+    }
+
+    .search::placeholder { color: rgba(247,251,255,.50); }
+
+    .chips {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+
+    .chips::-webkit-scrollbar { display: none; }
+
+    .chip {
+      flex: 0 0 auto;
+      color: var(--text);
+      background: rgba(255,255,255,.09);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 9px 12px;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .chip.active {
+      background: rgba(255,212,121,.22);
+      border-color: rgba(255,212,121,.55);
+      color: #ffe7ad;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 11px;
+      margin-top: 12px;
+    }
+
+    @media (min-width: 760px) {
+      .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .now { grid-template-columns: 1fr 360px; align-items: center; }
+    }
+
+    .station {
+      min-height: 126px;
+      border: 1px solid var(--line);
+      background: linear-gradient(145deg, rgba(255,255,255,.13), rgba(255,255,255,.06));
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: 0 14px 38px rgba(0,0,0,.18);
+      cursor: pointer;
+      display: grid;
+      align-content: space-between;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .station::after {
+      content: "";
+      position: absolute;
+      width: 90px;
+      height: 90px;
+      right: -32px;
+      top: -30px;
+      border-radius: 50%;
+      background: var(--accent, rgba(255,255,255,.18));
+      opacity: .24;
+    }
+
+    .station.playing {
+      outline: 2px solid rgba(255,212,121,.75);
+      background: linear-gradient(145deg, rgba(255,212,121,.22), rgba(255,255,255,.08));
+    }
+
+    .badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      font-size: 19px;
+      background: var(--accent, rgba(255,255,255,.18));
+      color: #101827;
+      font-weight: 900;
+      position: relative;
+      z-index: 1;
+    }
+
+    .station h2 {
+      margin: 0;
+      font-size: 16px;
+      line-height: 1.25;
+      letter-spacing: -.35px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .station p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+      position: relative;
+      z-index: 1;
+    }
+
+    .footer-note {
+      color: rgba(247,251,255,.54);
+      font-size: 12px;
+      line-height: 1.55;
+      padding: 18px 4px 2px;
+      text-align: center;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(18px + env(safe-area-inset-bottom));
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      width: min(430px, calc(100% - 28px));
+      background: rgba(10, 14, 24, .92);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 13px 14px;
+      box-shadow: var(--shadow);
+      transition: .25s ease;
+      pointer-events: none;
+      font-size: 13px;
+      z-index: 10;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .hidden-player {
+      display: none;
+      width: 100%;
+      height: 160px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      margin-top: 10px;
+      background: rgba(255,255,255,.08);
+    }
+
+    .hidden-player.show { display: block; }
+
+    .small-help {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <section class="hero">
+      <div class="topline">
+        <div class="brand">
+          <div class="logo">📻</div>
+          <div>
+            <h1>한국 라디오</h1>
+            <p class="sub">GitHub Pages용 모바일 라디오 앱</p>
+          </div>
+        </div>
+        <div class="status" id="status">대기중</div>
+      </div>
+
+      <div class="now">
+        <div>
+          <div class="now-title" id="nowTitle">채널을 선택하세요</div>
+          <div class="now-meta" id="nowMeta">국내 채널만 담아둔 심플 라디오</div>
+        </div>
+        <audio id="audio" controls playsinline preload="none"></audio>
+      </div>
+
+      <div class="control-row">
+        <button class="primary" id="playBtn">▶ 재생</button>
+        <button id="stopBtn">■ 정지</button>
+      </div>
+
+      <div class="control-row">
+        <a class="open-link" id="openLink" href="#" target="_blank" rel="noopener">새창 플레이어</a>
+        <button id="fallbackBtn">안 나오면 보조재생</button>
+      </div>
+
+      <iframe id="fallbackFrame" class="hidden-player" title="보조 라디오 플레이어"></iframe>
+      <p class="small-help">일부 방송은 브라우저/휴대폰에 따라 바로 재생이 막힐 수 있습니다. 그때는 “새창 플레이어” 또는 “보조재생”을 누르면 됩니다.</p>
+    </section>
+
+    <div class="search-wrap">
+      <input class="search" id="searchInput" type="search" placeholder="채널 검색: KBS, MBC, SBS, CBS, EBS..." />
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <section class="grid" id="stationGrid"></section>
+
+    <p class="footer-note">
+      개인용/테스트용 라디오 앱입니다. 방송 스트림은 각 방송사 또는 공개 라디오 스트림 중계 주소에 의존하므로, 방송사 정책 변경 시 일부 채널이 멈출 수 있습니다.
+    </p>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const BASE = "https://radio.bsod.kr/stream/";
+    const PLAYER_BASE = "https://radio.bsod.kr/stream/player.html";
+
+    const stations = [
+      { name: "KBS 1라디오", group: "KBS", desc: "뉴스 · 시사 · 교양", icon: "K1", accent: "#ffd479", query: "stn=kbs&ch=1radio" },
+      { name: "KBS 2라디오", group: "KBS", desc: "해피FM", icon: "K2", accent: "#ffb56b", query: "stn=kbs&ch=2radio" },
+      { name: "KBS 1FM", group: "KBS", desc: "클래식FM", icon: "K1", accent: "#b8d9ff", query: "stn=kbs&ch=1fm" },
+      { name: "KBS 2FM", group: "KBS", desc: "Cool FM", icon: "K2", accent: "#92f2b8", query: "stn=kbs&ch=2fm" },
+
+      { name: "MBC 표준FM", group: "MBC", desc: "뉴스 · 시사 · 라디오", icon: "M", accent: "#8bd3ff", query: "stn=mbc&ch=sfm" },
+      { name: "MBC FM4U", group: "MBC", desc: "음악 · 예능", icon: "4U", accent: "#ff8fab", query: "stn=mbc&ch=fm4u" },
+      { name: "MBC 올댓뮤직", group: "MBC", desc: "음악 채널", icon: "AM", accent: "#d0b3ff", query: "stn=mbc&ch=chm" },
+
+      { name: "SBS 러브FM", group: "SBS", desc: "러브FM", icon: "L", accent: "#ffa7a7", query: "stn=sbs&ch=lovefm" },
+      { name: "SBS 파워FM", group: "SBS", desc: "파워FM", icon: "P", accent: "#ffcf7a", query: "stn=sbs&ch=powerfm" },
+      { name: "SBS 고릴라디오M", group: "SBS", desc: "음악 전문", icon: "GM", accent: "#9ff0d0", query: "stn=sbs&ch=dmb" },
+
+      { name: "EBS FM", group: "공영", desc: "교육 · 교양", icon: "E", accent: "#a7e7ff", query: "stn=ebs" },
+      { name: "YTN 라디오", group: "뉴스", desc: "뉴스 전문", icon: "Y", accent: "#86b7ff", query: "stn=ytn" },
+      { name: "TBS FM", group: "교통", desc: "서울 교통 · 생활", icon: "T", accent: "#ffd479", query: "stn=tbs&ch=fm" },
+      { name: "TBN 경인교통방송", group: "교통", desc: "교통 정보", icon: "TN", accent: "#92f2b8", query: "stn=tbn" },
+
+      { name: "CBS 표준FM", group: "CBS", desc: "시사 · 교양", icon: "C", accent: "#b7d2ff", query: "stn=cbs&ch=sfm" },
+      { name: "CBS 음악FM", group: "CBS", desc: "음악FM", icon: "CM", accent: "#ffe29a", query: "stn=cbs&ch=mfm" },
+      { name: "CBS JOY4U", group: "CBS", desc: "CCM · 음악", icon: "J", accent: "#b9f5d0", query: "stn=cbs&ch=joy4u" },
+
+      { name: "BBS 서울불교방송", group: "종교", desc: "불교방송", icon: "B", accent: "#dac1ff", query: "stn=bbs" },
+      { name: "FEBC 서울극동방송", group: "종교", desc: "극동방송", icon: "F", accent: "#ffc7dc", query: "stn=febc" },
+      { name: "국악방송", group: "음악", desc: "국악 전문", icon: "국", accent: "#ffd479", query: "stn=kugak" },
+      { name: "국방FM", group: "공공", desc: "국방 라디오", icon: "D", accent: "#b8f2a3", query: "stn=kookbang" },
+      { name: "iFM 경인방송", group: "지역", desc: "인천 · 경기", icon: "i", accent: "#8bd3ff", query: "stn=ifm" },
+      { name: "OBS 라디오", group: "지역", desc: "수도권 라디오", icon: "O", accent: "#ffb56b", query: "stn=obs" }
+    ];
+
+    const groups = ["전체", ...Array.from(new Set(stations.map(s => s.group)))];
+
+    const audio = document.getElementById("audio");
+    const grid = document.getElementById("stationGrid");
+    const nowTitle = document.getElementById("nowTitle");
+    const nowMeta = document.getElementById("nowMeta");
+    const statusEl = document.getElementById("status");
+    const playBtn = document.getElementById("playBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const openLink = document.getElementById("openLink");
+    const fallbackBtn = document.getElementById("fallbackBtn");
+    const fallbackFrame = document.getElementById("fallbackFrame");
+    const searchInput = document.getElementById("searchInput");
+    const chips = document.getElementById("chips");
+    const toast = document.getElementById("toast");
+
+    let selected = null;
+    let activeGroup = "전체";
+
+    function streamUrl(station) {
+      return `${BASE}?${station.query}`;
+    }
+
+    function playerUrl(station) {
+      return `${PLAYER_BASE}?${station.query}`;
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function renderChips() {
+      chips.innerHTML = groups.map(group => `
+        <button class="chip ${group === activeGroup ? "active" : ""}" data-group="${group}">${group}</button>
+      `).join("");
+
+      chips.querySelectorAll(".chip").forEach(btn => {
+        btn.addEventListener("click", () => {
+          activeGroup = btn.dataset.group;
+          renderChips();
+          renderStations();
+        });
+      });
+    }
+
+    function stationMatches(station) {
+      const q = searchInput.value.trim().toLowerCase();
+      const groupOk = activeGroup === "전체" || station.group === activeGroup;
+      const text = `${station.name} ${station.group} ${station.desc}`.toLowerCase();
+      return groupOk && (!q || text.includes(q));
+    }
+
+    function renderStations() {
+      const items = stations.filter(stationMatches);
+      grid.innerHTML = items.map((station, index) => `
+        <article class="station ${selected && selected.name === station.name ? "playing" : ""}"
+          data-index="${stations.indexOf(station)}"
+          style="--accent:${station.accent}">
+          <div>
+            <div class="badge">${station.icon}</div>
+          </div>
+          <div>
+            <h2>${station.name}</h2>
+            <p>${station.group} · ${station.desc}</p>
+          </div>
+        </article>
+      `).join("");
+
+      grid.querySelectorAll(".station").forEach(card => {
+        card.addEventListener("click", () => selectStation(stations[Number(card.dataset.index)], true));
+      });
+    }
+
+    async function selectStation(station, autoplay = true) {
+      selected = station;
+      nowTitle.textContent = station.name;
+      nowMeta.textContent = `${station.group} · ${station.desc}`;
+      openLink.href = playerUrl(station);
+      fallbackFrame.classList.remove("show");
+      fallbackFrame.removeAttribute("src");
+
+      audio.src = streamUrl(station);
+      audio.load();
+      localStorage.setItem("lastStation", station.name);
+
+      renderStations();
+      setStatus("선택됨");
+
+      if (autoplay) {
+        try {
+          setStatus("연결중");
+          await audio.play();
+          setStatus("재생중");
+        } catch (err) {
+          setStatus("재생 대기");
+          showToast("휴대폰 정책상 재생 버튼을 한 번 더 눌러야 할 수 있어요.");
+        }
+      }
+    }
+
+    async function playSelected() {
+      if (!selected) {
+        selectStation(stations[0], false);
+      }
+
+      try {
+        setStatus("연결중");
+        await audio.play();
+        setStatus("재생중");
+      } catch (err) {
+        setStatus("재생 실패");
+        showToast("재생이 안 되면 새창 플레이어나 보조재생을 눌러주세요.");
+      }
+    }
+
+    function stopAudio() {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      setStatus("정지");
+    }
+
+    function showFallback() {
+      if (!selected) {
+        showToast("먼저 채널을 선택하세요.");
+        return;
+      }
+      fallbackFrame.src = playerUrl(selected);
+      fallbackFrame.classList.add("show");
+      showToast("보조 플레이어를 열었습니다.");
+    }
+
+    audio.addEventListener("playing", () => setStatus("재생중"));
+    audio.addEventListener("waiting", () => setStatus("버퍼링"));
+    audio.addEventListener("pause", () => setStatus("일시정지"));
+    audio.addEventListener("error", () => {
+      setStatus("오류");
+      showToast("이 채널은 현재 브라우저에서 바로 재생이 안 될 수 있어요.");
+    });
+
+    playBtn.addEventListener("click", playSelected);
+    stopBtn.addEventListener("click", stopAudio);
+    fallbackBtn.addEventListener("click", showFallback);
+    searchInput.addEventListener("input", renderStations);
+
+    renderChips();
+    renderStations();
+
+    const lastName = localStorage.getItem("lastStation");
+    const last = stations.find(s => s.name === lastName);
+    if (last) {
+      selectStation(last, false);
+    } else {
+      openLink.href = "#";
+    }
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    }
+  </script>
+</body>
+</html>
