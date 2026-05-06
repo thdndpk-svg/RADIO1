@@ -9,6 +9,7 @@
   <title>한국 라디오</title>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+
   <style>
     :root {
       --bg1: #101827;
@@ -27,8 +28,20 @@
       --radius: 26px;
     }
 
-    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    html, body { margin: 0; min-height: 100%; background: var(--bg1); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", Segoe UI, sans-serif; }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background: var(--bg1);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", Segoe UI, sans-serif;
+    }
+
     body {
       background:
         radial-gradient(circle at 10% 10%, rgba(255,212,121,.24), transparent 28%),
@@ -51,9 +64,11 @@
       border-radius: 32px;
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
-      position: sticky;
-      top: max(10px, env(safe-area-inset-top));
-      z-index: 5;
+
+      /* 수정 완료:
+         기존 position: sticky 때문에 휴대폰에서 재생창이 위에 붙어서 채널을 가렸음.
+         이제 화면을 위로 올리면 재생창도 같이 올라감. */
+      position: relative;
     }
 
     .topline {
@@ -83,8 +98,18 @@
       flex: 0 0 auto;
     }
 
-    h1 { margin: 0; font-size: 22px; letter-spacing: -.6px; }
-    .sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -.6px;
+    }
+
+    .sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
 
     .status {
       font-size: 12px;
@@ -128,7 +153,8 @@
       margin-top: 2px;
     }
 
-    button, .open-link {
+    button,
+    .open-link {
       appearance: none;
       border: 0;
       border-radius: 18px;
@@ -152,7 +178,12 @@
       border: 0;
     }
 
-    button:active, .station:active, .chip:active, .open-link:active { transform: scale(.985); }
+    button:active,
+    .station:active,
+    .chip:active,
+    .open-link:active {
+      transform: scale(.985);
+    }
 
     .search-wrap {
       margin: 14px 0 12px;
@@ -171,7 +202,9 @@
       font-size: 15px;
     }
 
-    .search::placeholder { color: rgba(247,251,255,.50); }
+    .search::placeholder {
+      color: rgba(247,251,255,.50);
+    }
 
     .chips {
       display: flex;
@@ -181,7 +214,9 @@
       scrollbar-width: none;
     }
 
-    .chips::-webkit-scrollbar { display: none; }
+    .chips::-webkit-scrollbar {
+      display: none;
+    }
 
     .chip {
       flex: 0 0 auto;
@@ -209,8 +244,14 @@
     }
 
     @media (min-width: 760px) {
-      .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-      .now { grid-template-columns: 1fr 360px; align-items: center; }
+      .grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .now {
+        grid-template-columns: 1fr 360px;
+        align-items: center;
+      }
     }
 
     .station {
@@ -319,7 +360,9 @@
       background: rgba(255,255,255,.08);
     }
 
-    .hidden-player.show { display: block; }
+    .hidden-player.show {
+      display: block;
+    }
 
     .small-help {
       color: var(--muted);
@@ -474,7 +517,8 @@
 
     function renderStations() {
       const items = stations.filter(stationMatches);
-      grid.innerHTML = items.map((station, index) => `
+
+      grid.innerHTML = items.map((station) => `
         <article class="station ${selected && selected.name === station.name ? "playing" : ""}"
           data-index="${stations.indexOf(station)}"
           style="--accent:${station.accent}">
@@ -547,6 +591,7 @@
         showToast("먼저 채널을 선택하세요.");
         return;
       }
+
       fallbackFrame.src = playerUrl(selected);
       fallbackFrame.classList.add("show");
       showToast("보조 플레이어를 열었습니다.");
@@ -570,14 +615,26 @@
 
     const lastName = localStorage.getItem("lastStation");
     const last = stations.find(s => s.name === lastName);
+
     if (last) {
       selectStation(last, false);
     } else {
       openLink.href = "#";
     }
 
+    /* 수정 완료:
+       예전 service worker 캐시 때문에 이전 sticky 버전이 계속 보일 수 있어서
+       등록된 service worker와 캐시를 정리함. */
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+      navigator.serviceWorker.getRegistrations()
+        .then(regs => regs.forEach(reg => reg.unregister()))
+        .catch(() => {});
+    }
+
+    if (window.caches) {
+      caches.keys()
+        .then(keys => keys.forEach(key => caches.delete(key)))
+        .catch(() => {});
     }
   </script>
 </body>
