@@ -1013,6 +1013,73 @@
       }
     }
 
+    function startImmediateChannelPlayback(station) {
+      const seq = ++playSequence;
+      const url = legacyStreamUrl(station);
+      openLink.href = url;
+
+      destroyHls();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+
+      if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls();
+        currentHls = hls;
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data || !data.fatal || currentHls !== hls || seq !== playSequence) return;
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            try {
+              hls.startLoad();
+              return;
+            } catch {}
+          }
+
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            try {
+              hls.recoverMediaError();
+              return;
+            } catch {}
+          }
+
+          setStatus("재생 준비");
+        });
+
+        hls.loadSource(url);
+        hls.attachMedia(audio);
+        setStatus("연결중");
+
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          playPromise
+            .then(() => {
+              if (seq === playSequence) setStatus("재생중");
+            })
+            .catch(() => {
+              if (seq === playSequence) setStatus("재생 준비");
+            });
+        }
+        return;
+      }
+
+      audio.src = url;
+      audio.load();
+      setStatus("연결중");
+
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise
+          .then(() => {
+            if (seq === playSequence) setStatus("재생중");
+          })
+          .catch(() => {
+            if (seq === playSequence) setStatus("재생 준비");
+          });
+      }
+    }
+
     async function selectStation(station, autoplay = true) {
       playSequence++;
       abortResolve();
@@ -1041,10 +1108,10 @@
           }
         });
 
-      // 자동재생 대신 주소만 미리 준비한다.
-      // 안드로이드에서는 사용자가 재생 버튼을 누른 순간 실제 play()가 실행되어야 안정적이다.
+      // 채널을 누른 같은 사용자 터치 안에서 즉시 재생을 시작한다.
+      // 준비된 실제 URL은 실패 시 재생 버튼의 2차 시도에 사용한다.
       if (autoplay) {
-        showToast("주소를 준비하고 있습니다. 재생 버튼을 눌러주세요.");
+        startImmediateChannelPlayback(station);
       }
     }
 
