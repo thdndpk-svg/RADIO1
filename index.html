@@ -908,79 +908,47 @@
       setStatus("선택됨");
 
       if (autoplay) {
+        // 채널을 누른 같은 사용자 동작 안에서 즉시 play()를 호출한다.
+        // 안드로이드 Chrome의 재생 권한이 비동기 요청 사이에서 끊기지 않게 한다.
         await playSelected();
       }
     }
 
     async function playSelected() {
       if (!selected) {
-        await selectStation(stations[0], false);
+        selected = stations[0];
+        nowTitle.textContent = selected.name;
+        nowMeta.textContent = `${selected.group} · ${selected.desc}`;
+        renderStations();
       }
 
       const seq = ++playSequence;
       abortResolve();
-      clearAudioSource();
+      destroyHls();
 
-      // 고정 주소가 있는 방송은 중계 서버를 거치지 않고 바로 재생한다.
-      const staticUrl = STATIC_FALLBACKS[selected.name];
-      if (staticUrl) {
-        try {
-          setStatus("직접 연결중");
-          await playStreamUrl(staticUrl, seq);
-          if (seq !== playSequence) return;
-          setStatus("재생중 · 직접");
-          return;
-        } catch {
-          if (seq !== playSequence) return;
-          clearAudioSource();
-        }
-      }
+      const url = legacyStreamUrl(selected);
+      openLink.href = url;
 
-      // 중계 서버의 현재 공식 API 방식
+      audio.pause();
+      audio.src = url;
+      audio.load();
+      setStatus("연결중");
+
       try {
-        setStatus("중계 연결중");
-        const resolvedUrl = await resolveStreamUrl(selected);
-        if (seq !== playSequence) return;
-
-        await playStreamUrl(resolvedUrl, seq);
+        // 반드시 네트워크 API를 기다리기 전에 즉시 호출한다.
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          await playPromise;
+        }
         if (seq !== playSequence) return;
         setStatus("재생중");
-        return;
       } catch {
         if (seq !== playSequence) return;
-        clearAudioSource();
+        setStatus(navigator.onLine ? "재생 대기" : "오프라인");
+        showToast(navigator.onLine
+          ? "재생 버튼을 한 번 더 눌러주세요."
+          : "인터넷 연결을 확인해 주세요.");
       }
-
-      // KBS/MBC/SBS 또는 고정 방송의 방송사 직접 경로
-      try {
-        setStatus("방송사 직접 연결중");
-        const directUrl = await resolveBroadcasterDirect(selected);
-        if (seq !== playSequence) return;
-
-        await playStreamUrl(directUrl, seq);
-        if (seq !== playSequence) return;
-        setStatus("재생중 · 방송사 직접");
-        return;
-      } catch {
-        if (seq !== playSequence) return;
-        clearAudioSource();
-      }
-
-      // 마지막 호환 경로
-      try {
-        setStatus("호환 연결중");
-        await playLegacyFallback(seq);
-        if (seq !== playSequence) return;
-        setStatus("재생중 · 호환");
-        return;
-      } catch {
-        if (seq !== playSequence) return;
-      }
-
-      setStatus(navigator.onLine ? "재생 실패" : "오프라인");
-      showToast(navigator.onLine
-        ? "중계 서버와 방송사 직접 연결이 모두 실패했습니다."
-        : "인터넷 연결을 확인해 주세요.");
     }
 
     function stopAudio() {
@@ -1017,7 +985,7 @@
     audio.addEventListener("waiting", () => setStatus("버퍼링"));
     audio.addEventListener("pause", () => setStatus("일시정지"));
     audio.addEventListener("error", () => {
-      if (["직접 연결중", "중계 연결중", "방송사 직접 연결중", "호환 연결중", "보조 연결중"].includes(statusEl.textContent)) return;
+      if (["연결중", "보조 연결중"].includes(statusEl.textContent)) return;
       setStatus(navigator.onLine ? "오류" : "오프라인");
     });
 
