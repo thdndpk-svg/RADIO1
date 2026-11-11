@@ -429,14 +429,17 @@
     const RESOLVE_TIMEOUT_MS = 8000;
     const HLS_LOAD_TIMEOUT_MS = 6000;
     const HLS_CDNS = [
-      "https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js",
-      "https://unpkg.com/hls.js@1.7.4/dist/hls.min.js"
+      "https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js",
+      "https://unpkg.com/hls.js@latest/dist/hls.min.js"
     ];
 
     let currentHls = null;
     let resolveController = null;
     let hlsLoadPromise = null;
     let playSequence = 0;
+    let preparedStreamUrl = null;
+    let preparedStationName = null;
+    let preparePromise = null;
 
     const stations = [
       { name: "KBS 1라디오", group: "KBS", desc: "뉴스 · 시사 · 교양", icon: "K1", accent: "#ffd479", query: "stn=kbs&ch=1radio" },
@@ -891,6 +894,125 @@
       });
     }
 
+    async function prepareStationStream(station) {
+      preparedStreamUrl = null;
+      preparedStationName = null;
+
+      const staticUrl = STATIC_FALLBACKS[station.name];
+      if (staticUrl) {
+        preparedStreamUrl = staticUrl;
+        preparedStationName = station.name;
+        return staticUrl;
+      }
+
+      const params = new URLSearchParams(station.query);
+      const stn = params.get("stn");
+
+      // MBC는 토큰 만료 문제가 있으므로 방송사 직접 URL을 먼저 받는다.
+      if (stn === "mbc") {
+        try {
+          const directUrl = await resolveBroadcasterDirect(station);
+          preparedStreamUrl = directUrl;
+          preparedStationName = station.name;
+          return directUrl;
+        } catch {}
+      }
+
+      try {
+        const relayUrl = await resolveStreamUrl(station);
+        preparedStreamUrl = relayUrl;
+        preparedStationName = station.name;
+        return relayUrl;
+      } catch {}
+
+      try {
+        const directUrl = await resolveBroadcasterDirect(station);
+        preparedStreamUrl = directUrl;
+        preparedStationName = station.name;
+        return directUrl;
+      } catch {}
+
+      throw new Error("STREAM_PREPARE_FAILED");
+    }
+
+    function startPreparedPlayback(url, seq) {
+      if (seq !== playSequence) return;
+      if (!isSafeStreamUrl(url)) throw new Error("UNSAFE_STREAM_URL");
+
+      destroyHls();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      openLink.href = url;
+
+      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
+      const nativeHls = isHls &&
+        typeof audio.canPlayType === "function" &&
+        audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+      if (isHls && !nativeHls && window.Hls && Hls.isSupported()) {
+        const hls = new Hls();
+        currentHls = hls;
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data || !data.fatal || currentHls !== hls) return;
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            try {
+              hls.startLoad();
+              return;
+            } catch {}
+          }
+
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            try {
+              hls.recoverMediaError();
+              return;
+            } catch {}
+          }
+
+          setStatus("오류");
+          showToast("이 방송 스트림을 불러오지 못했습니다.");
+        });
+
+        // 사용자가 재생 버튼을 누른 같은 동작 안에서 MediaSource와 play()를 바로 연결한다.
+        hls.loadSource(url);
+        hls.attachMedia(audio);
+        setStatus("연결중");
+
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          playPromise
+            .then(() => {
+              if (seq === playSequence) setStatus("재생중");
+            })
+            .catch(() => {
+              if (seq !== playSequence) return;
+              setStatus("재생 준비");
+              showToast("재생 버튼을 한 번 더 눌러주세요.");
+            });
+        }
+        return;
+      }
+
+      audio.src = url;
+      audio.load();
+      setStatus("연결중");
+
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise
+          .then(() => {
+            if (seq === playSequence) setStatus("재생중");
+          })
+          .catch(() => {
+            if (seq !== playSequence) return;
+            setStatus("재생 준비");
+            showToast("재생 버튼을 한 번 더 눌러주세요.");
+          });
+      }
+    }
+
     async function selectStation(station, autoplay = true) {
       playSequence++;
       abortResolve();
@@ -905,49 +1027,74 @@
       localStorage.setItem("lastStation", station.name);
 
       renderStations();
-      setStatus("선택됨");
+      setStatus("주소 확인중");
 
+      preparePromise = prepareStationStream(station)
+        .then(() => {
+          if (selected && selected.name === station.name) {
+            setStatus("재생 준비");
+          }
+        })
+        .catch(() => {
+          if (selected && selected.name === station.name) {
+            setStatus("주소 오류");
+          }
+        });
+
+      // 자동재생 대신 주소만 미리 준비한다.
+      // 안드로이드에서는 사용자가 재생 버튼을 누른 순간 실제 play()가 실행되어야 안정적이다.
       if (autoplay) {
-        // 채널을 누른 같은 사용자 동작 안에서 즉시 play()를 호출한다.
-        // 안드로이드 Chrome의 재생 권한이 비동기 요청 사이에서 끊기지 않게 한다.
-        await playSelected();
+        showToast("주소를 준비하고 있습니다. 재생 버튼을 눌러주세요.");
       }
     }
 
     async function playSelected() {
       if (!selected) {
-        selected = stations[0];
-        nowTitle.textContent = selected.name;
-        nowMeta.textContent = `${selected.group} · ${selected.desc}`;
-        renderStations();
+        await selectStation(stations[0], false);
+      }
+
+      if (!window.Hls) {
+        setStatus("재생기 준비중");
+        const loaded = await ensureHlsLibrary();
+        if (!loaded) {
+          setStatus("재생기 오류");
+          showToast("HLS 재생기를 불러오지 못했습니다.");
+          return;
+        }
+
+        setStatus("재생 준비");
+        showToast("재생기가 준비됐습니다. 재생 버튼을 한 번 더 눌러주세요.");
+        return;
+      }
+
+      if (!preparedStreamUrl || preparedStationName !== selected.name) {
+        setStatus("주소 확인중");
+
+        try {
+          if (preparePromise) {
+            await preparePromise;
+          } else {
+            await prepareStationStream(selected);
+          }
+        } catch {
+          setStatus("주소 오류");
+          showToast("방송 주소를 가져오지 못했습니다.");
+          return;
+        }
+
+        // 비동기 주소 확인 뒤에는 사용자 제스처가 끝났으므로 한 번 더 누르게 한다.
+        setStatus("재생 준비");
+        showToast("방송 주소가 준비됐습니다. 재생 버튼을 한 번 더 눌러주세요.");
+        return;
       }
 
       const seq = ++playSequence;
-      abortResolve();
-      destroyHls();
-
-      const url = legacyStreamUrl(selected);
-      openLink.href = url;
-
-      audio.pause();
-      audio.src = url;
-      audio.load();
-      setStatus("연결중");
 
       try {
-        // 반드시 네트워크 API를 기다리기 전에 즉시 호출한다.
-        const playPromise = audio.play();
-        if (playPromise && typeof playPromise.then === "function") {
-          await playPromise;
-        }
-        if (seq !== playSequence) return;
-        setStatus("재생중");
+        startPreparedPlayback(preparedStreamUrl, seq);
       } catch {
-        if (seq !== playSequence) return;
-        setStatus(navigator.onLine ? "재생 대기" : "오프라인");
-        showToast(navigator.onLine
-          ? "재생 버튼을 한 번 더 눌러주세요."
-          : "인터넷 연결을 확인해 주세요.");
+        setStatus("오류");
+        showToast("재생 준비 중 오류가 발생했습니다.");
       }
     }
 
@@ -985,7 +1132,7 @@
     audio.addEventListener("waiting", () => setStatus("버퍼링"));
     audio.addEventListener("pause", () => setStatus("일시정지"));
     audio.addEventListener("error", () => {
-      if (["연결중", "보조 연결중"].includes(statusEl.textContent)) return;
+      if (["연결중", "재생 준비", "주소 확인중", "재생기 준비중", "보조 연결중"].includes(statusEl.textContent)) return;
       setStatus(navigator.onLine ? "오류" : "오프라인");
     });
 
@@ -1001,6 +1148,7 @@
 
     renderChips();
     renderStations();
+    ensureHlsLibrary().catch(() => {});
 
     const lastName = localStorage.getItem("lastStation");
     const last = stations.find(s => s.name === lastName);
