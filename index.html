@@ -472,7 +472,14 @@
       { name: "OBS 라디오", group: "지역", desc: "수도권 라디오", icon: "O", accent: "#ffb56b", query: "stn=obs" }
     ];
 
+    const PROXY_BASE = "https://radio-stream-proxy-topaz.vercel.app/api/stream";
+
     const STATIC_FALLBACKS = {
+      "MBC 표준FM": `${PROXY_BASE}?station=mbc-sfm`,
+      "MBC FM4U": `${PROXY_BASE}?station=mbc-fm4u`,
+      "MBC 올댓뮤직": `${PROXY_BASE}?station=mbc-chm`,
+      "TBN 경인교통방송": `${PROXY_BASE}?station=tbn-gyeongin`,
+      "FEBC 서울극동방송": `${PROXY_BASE}?station=febc-seoul`,
       "EBS FM": "https://ebsonair.ebs.co.kr/fmradiofamilypc/familypc1m/playlist.m3u8",
       "YTN 라디오": "https://radiolive.ytn.co.kr/radio/_definst_/20211118_fmlive/playlist.m3u8",
       "TBS FM": "https://cdnfm.tbs.seoul.kr/tbs/_definst_/tbs_fm_web_360.smil/playlist.m3u8",
@@ -1040,22 +1047,8 @@
         const hls = new Hls();
         currentHls = hls;
 
-        let tbnAltTried = false;
-
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data || !data.fatal || currentHls !== hls || seq !== playSequence) return;
-
-          if (station.name === "TBN 경인교통방송" && !tbnAltTried) {
-            tbnAltTried = true;
-            preparedStreamUrl = TBN_GYEONGIN_ALT;
-            preparedStationName = station.name;
-            openLink.href = TBN_GYEONGIN_ALT;
-            try {
-              hls.loadSource(TBN_GYEONGIN_ALT);
-              setStatus("TBN 보조 연결중");
-              return;
-            } catch {}
-          }
 
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             try {
@@ -1151,28 +1144,12 @@
       nowTitle.textContent = station.name;
       nowMeta.textContent = `${station.group} · ${station.desc}`;
       openLink.href = legacyStreamUrl(station);
-      openLink.textContent = station.name === "FEBC 서울극동방송"
-        ? "극동방송 외부재생"
-        : "새창 플레이어";
+      openLink.textContent = "새창 플레이어";
       fallbackFrame.classList.remove("show");
       fallbackFrame.removeAttribute("src");
       localStorage.setItem("lastStation", station.name);
 
       renderStations();
-
-      // 서울 극동방송의 현재 공개 스트림은 HTTP뿐이라 HTTPS GitHub 앱 내부에서는 혼합 콘텐츠로 차단된다.
-      // HTTPS 중계 주소를 새 창으로 열어 브라우저가 외부 스트림으로 이동하도록 한다.
-      if (station.name === "FEBC 서울극동방송") {
-        preparedStreamUrl = null;
-        preparedStationName = null;
-        preparePromise = null;
-        setStatus("외부재생");
-        if (autoplay) {
-          showToast("서울 극동방송은 아래 '극동방송 외부재생' 버튼으로 들어주세요.");
-        }
-        return;
-      }
-
       setStatus("주소 확인중");
 
       preparePromise = prepareStationStream(station)
