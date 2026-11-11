@@ -429,8 +429,8 @@
     const RESOLVE_TIMEOUT_MS = 8000;
     const HLS_LOAD_TIMEOUT_MS = 6000;
     const HLS_CDNS = [
-      "https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js",
-      "https://unpkg.com/hls.js@1.7.3/dist/hls.min.js"
+      "https://cdn.jsdelivr.net/npm/hls.js@1.7.4/dist/hls.min.js",
+      "https://unpkg.com/hls.js@1.7.4/dist/hls.min.js"
     ];
 
     let currentHls = null;
@@ -468,6 +468,27 @@
       { name: "iFM 경인방송", group: "지역", desc: "인천 · 경기", icon: "i", accent: "#8bd3ff", query: "stn=ifm" },
       { name: "OBS 라디오", group: "지역", desc: "수도권 라디오", icon: "O", accent: "#ffb56b", query: "stn=obs" }
     ];
+
+    const STATIC_FALLBACKS = {
+      "EBS FM": "https://ebsonair.ebs.co.kr/fmradiofamilypc/familypc1m/playlist.m3u8",
+      "YTN 라디오": "https://radiolive.ytn.co.kr/radio/_definst_/20211118_fmlive/playlist.m3u8",
+      "TBS FM": "https://cdnfm.tbs.seoul.kr/tbs/_definst_/tbs_fm_web_360.smil/playlist.m3u8",
+      "CBS 표준FM": "https://m-aac.cbs.co.kr/mweb_cbs981/_definst_/cbs981.stream/playlist.m3u8",
+      "CBS 음악FM": "https://m-aac.cbs.co.kr/mweb_cbs939/_definst_/cbs939.stream/playlist.m3u8",
+      "CBS JOY4U": "https://m-aac.cbs.co.kr/mweb_cbscmc/_definst_/cbscmc.stream/playlist.m3u8",
+      "BBS 서울불교방송": "https://bbslive.clouducs.com/bbsradio-mlive/radio.stream/playlist.m3u8",
+      "국악방송": "https://mgugaklive.nowcdn.co.kr/gugakradio/gugakradio.stream/playlist.m3u8",
+      "국방FM": "https://mediaworks.dema.mil.kr/live_edge/audio.sdp/playlist.m3u8",
+      "iFM 경인방송": "https://stream.ifm.kr/live/aod1/playlist.m3u8",
+      "OBS 라디오": "https://vod3.obs.co.kr:444/live/obsstream1/radio.stream/playlist.m3u8"
+    };
+
+    const KBS_CODES = {
+      "1radio": "21",
+      "2radio": "22",
+      "1fm": "24",
+      "2fm": "25"
+    };
 
     const groups = ["전체", ...Array.from(new Set(stations.map(s => s.group)))];
 
@@ -644,17 +665,11 @@
       openLink.href = url;
       audio.src = url;
       audio.load();
-
-      // 중요: 안드로이드에서 검증된 기존 방식.
-      // 브라우저의 미디어 플레이어가 리다이렉트/HLS를 직접 처리하게 한다.
       await audio.play();
     }
 
     async function playWithHlsJs(url, seq) {
       if (seq !== playSequence) return;
-
-      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
-      if (!isHls) throw new Error("NOT_HLS");
 
       const loaded = await ensureHlsLibrary();
       if (!loaded || !window.Hls || !Hls.isSupported()) {
@@ -662,10 +677,7 @@
       }
 
       await new Promise((resolve, reject) => {
-        const hls = new Hls({
-          enableWorker: true,
-          backBufferLength: 30
-        });
+        const hls = new Hls();
         currentHls = hls;
         let settled = false;
         let recoveredNetwork = false;
@@ -729,10 +741,102 @@
       });
     }
 
+    async function playStreamUrl(url, seq) {
+      if (!isSafeStreamUrl(url)) throw new Error("UNSAFE_STREAM_URL");
+
+      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
+      const nativeHls = isHls &&
+        typeof audio.canPlayType === "function" &&
+        audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+      if (isHls && !nativeHls) {
+        const loaded = await ensureHlsLibrary();
+        if (loaded && window.Hls && Hls.isSupported()) {
+          return playWithHlsJs(url, seq);
+        }
+      }
+
+      return playDirectUrl(url, seq);
+    }
+
+    async function fetchTextUrl(url) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        const value = (await response.text()).trim();
+        if (!isSafeStreamUrl(value)) throw new Error("INVALID_DIRECT_URL");
+        return value;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function resolveBroadcasterDirect(station) {
+      const params = new URLSearchParams(station.query);
+      const stn = params.get("stn");
+      const ch = params.get("ch");
+
+      if (stn === "kbs" && KBS_CODES[ch]) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
+        try {
+          const response = await fetch(
+            `https://kbs-api-proxy.bsod.workers.dev/${KBS_CODES[ch]}`,
+            {
+              cache: "no-store",
+              credentials: "omit",
+              referrerPolicy: "no-referrer",
+              signal: controller.signal
+            }
+          );
+          if (!response.ok) throw new Error(`KBS_HTTP_${response.status}`);
+          const data = await response.json();
+          const url = data?.channel_item?.[0]?.service_url;
+          if (!isSafeStreamUrl(url)) throw new Error("INVALID_KBS_URL");
+          return url;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      if (stn === "mbc") {
+        const channel = ch === "fm4u" ? "mfm" : ch;
+        if (["sfm", "mfm", "chm"].includes(channel)) {
+          return fetchTextUrl(
+            `https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=${channel}`
+          );
+        }
+      }
+
+      if (stn === "sbs") {
+        const endpoints = {
+          "lovefm": "https://apis.sbs.co.kr/play-api/1.0/livestream/lovepc/lovefm?protocol=hls&ssl=Y",
+          "powerfm": "https://apis.sbs.co.kr/play-api/1.0/livestream/powerpc/powerfm?protocol=hls&ssl=Y",
+          "dmb": "https://apis.sbs.co.kr/play-api/1.0/livestream/sbsdmbpc/sbsdmb?protocol=hls&ssl=Y"
+        };
+        if (endpoints[ch]) return fetchTextUrl(endpoints[ch]);
+      }
+
+      const staticUrl = STATIC_FALLBACKS[station.name];
+      if (staticUrl) return staticUrl;
+
+      throw new Error("NO_DIRECT_FALLBACK");
+    }
+
     async function playLegacyFallback(seq) {
       if (!selected || seq !== playSequence) return;
       await playDirectUrl(legacyStreamUrl(selected), seq);
     }
+
 
     function showToast(message) {
       toast.textContent = message;
@@ -817,46 +921,57 @@
       abortResolve();
       clearAudioSource();
 
-      // 1순위: 처음부터 안드로이드에서 잘 사용하던 직접 재생 방식
+      // 고정 주소가 있는 방송은 중계 서버를 거치지 않고 바로 재생한다.
+      const staticUrl = STATIC_FALLBACKS[selected.name];
+      if (staticUrl) {
+        try {
+          setStatus("직접 연결중");
+          await playStreamUrl(staticUrl, seq);
+          if (seq !== playSequence) return;
+          setStatus("재생중 · 직접");
+          return;
+        } catch {
+          if (seq !== playSequence) return;
+          clearAudioSource();
+        }
+      }
+
+      // 중계 서버의 현재 공식 API 방식
       try {
-        setStatus("연결중");
-        await playDirectUrl(legacyStreamUrl(selected), seq);
+        setStatus("중계 연결중");
+        const resolvedUrl = await resolveStreamUrl(selected);
+        if (seq !== playSequence) return;
+
+        await playStreamUrl(resolvedUrl, seq);
         if (seq !== playSequence) return;
         setStatus("재생중");
         return;
       } catch {
         if (seq !== playSequence) return;
+        clearAudioSource();
       }
 
-      let resolvedUrl = null;
-
-      // 2순위: 중계 서버의 최신/이전 JSON API에서 실제 주소를 받아
-      // HLS.js를 거치지 않고 브라우저 미디어 플레이어로 직접 재생
+      // KBS/MBC/SBS 또는 고정 방송의 방송사 직접 경로
       try {
-        setStatus("대체 연결중");
-        resolvedUrl = await resolveStreamUrl(selected);
+        setStatus("방송사 직접 연결중");
+        const directUrl = await resolveBroadcasterDirect(selected);
         if (seq !== playSequence) return;
 
-        await playDirectUrl(resolvedUrl, seq);
+        await playStreamUrl(directUrl, seq);
         if (seq !== playSequence) return;
-        setStatus("재생중 · 대체");
+        setStatus("재생중 · 방송사 직접");
         return;
       } catch {
         if (seq !== playSequence) return;
+        clearAudioSource();
       }
 
-      // 3순위: 직접 재생까지 실패한 HLS 주소에만 HLS.js 사용
+      // 마지막 호환 경로
       try {
-        if (!resolvedUrl) {
-          resolvedUrl = await resolveStreamUrl(selected);
-        }
+        setStatus("호환 연결중");
+        await playLegacyFallback(seq);
         if (seq !== playSequence) return;
-
-        setStatus("HLS 보조 연결중");
-        clearAudioSource();
-        await playWithHlsJs(resolvedUrl, seq);
-        if (seq !== playSequence) return;
-        setStatus("재생중 · HLS");
+        setStatus("재생중 · 호환");
         return;
       } catch {
         if (seq !== playSequence) return;
@@ -864,7 +979,7 @@
 
       setStatus(navigator.onLine ? "재생 실패" : "오프라인");
       showToast(navigator.onLine
-        ? "현재 중계 서버 또는 방송 스트림에 연결할 수 없습니다."
+        ? "중계 서버와 방송사 직접 연결이 모두 실패했습니다."
         : "인터넷 연결을 확인해 주세요.");
     }
 
@@ -902,7 +1017,7 @@
     audio.addEventListener("waiting", () => setStatus("버퍼링"));
     audio.addEventListener("pause", () => setStatus("일시정지"));
     audio.addEventListener("error", () => {
-      if (["연결중", "대체 연결중", "HLS 보조 연결중", "보조 연결중"].includes(statusEl.textContent)) return;
+      if (["직접 연결중", "중계 연결중", "방송사 직접 연결중", "호환 연결중", "보조 연결중"].includes(statusEl.textContent)) return;
       setStatus(navigator.onLine ? "오류" : "오프라인");
     });
 
