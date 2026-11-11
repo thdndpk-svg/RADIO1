@@ -65,10 +65,10 @@
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
 
-      /* 수정 완료:
-         기존 position: sticky 때문에 휴대폰에서 재생창이 위에 붙어서 채널을 가렸음.
-         이제 화면을 위로 올리면 재생창도 같이 올라감. */
-      position: relative;
+      /* 스크롤 중에도 재생 컨트롤을 화면에 유지 */
+      position: sticky;
+      top: max(10px, env(safe-area-inset-top));
+      z-index: 5;
     }
 
     .topline {
