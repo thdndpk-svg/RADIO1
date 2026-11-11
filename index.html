@@ -517,25 +517,7 @@
       return `${LEGACY_BASE}?${station.query}&format=json`;
     }
 
-    const TBN_GYEONGIN_HTTPS = "https://5cc6beb04faf6.streamlock.net/gyeongin/myStream/playlist.m3u8";
-    const FEBC_SEOUL_HTTP = "http://mlive2.febc.net:1935/live/seoulfm/playlist.m3u8";
-
     function legacyStreamUrl(station) {
-      if (station.name === "TBN 경인교통방송") {
-        return TBN_GYEONGIN_HTTPS;
-      }
-
-      if (station.name === "FEBC 서울극동방송") {
-        return FEBC_SEOUL_HTTP;
-      }
-
-      if (station.group === "MBC") {
-        // MBC 스트림 URL은 만료 토큰을 포함하므로 중계 서버의 장기 캐시를 우회한다.
-        // getUrlCached()의 캐시 키에 bora 값이 포함되고, MBC 일반 라디오는 이 값을 무시한다.
-        const refreshKey = `sbm-${Date.now()}`;
-        return `${LEGACY_BASE}?${station.query}&bora=${refreshKey}`;
-      }
-
       return `${LEGACY_BASE}?${station.query}`;
     }
 
@@ -918,9 +900,6 @@
       nowTitle.textContent = station.name;
       nowMeta.textContent = `${station.group} · ${station.desc}`;
       openLink.href = legacyStreamUrl(station);
-      openLink.textContent = station.name === "FEBC 서울극동방송"
-        ? "극동방송 외부재생"
-        : "새창 플레이어";
       fallbackFrame.classList.remove("show");
       fallbackFrame.removeAttribute("src");
       localStorage.setItem("lastStation", station.name);
@@ -949,15 +928,6 @@
 
       const url = legacyStreamUrl(selected);
       openLink.href = url;
-
-      if (selected.name === "FEBC 서울극동방송") {
-        audio.pause();
-        audio.removeAttribute("src");
-        audio.load();
-        setStatus("외부재생 필요");
-        showToast("서울 극동방송은 현재 HTTP 스트림만 제공되어 아래 외부재생 버튼을 눌러주세요.");
-        return;
-      }
 
       audio.pause();
       audio.src = url;
