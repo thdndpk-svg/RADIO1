@@ -465,7 +465,6 @@
       { name: "CBS JOY4U", group: "CBS", desc: "CCM · 음악", icon: "J", accent: "#b9f5d0", query: "stn=cbs&ch=joy4u" },
 
       { name: "BBS 서울불교방송", group: "종교", desc: "불교방송", icon: "B", accent: "#dac1ff", query: "stn=bbs" },
-      { name: "FEBC 서울극동방송", group: "종교", desc: "극동방송", icon: "F", accent: "#ffc7dc", query: "stn=febc" },
       { name: "국악방송", group: "음악", desc: "국악 전문", icon: "국", accent: "#ffd479", query: "stn=kugak" },
       { name: "국방FM", group: "공공", desc: "국방 라디오", icon: "D", accent: "#b8f2a3", query: "stn=kookbang" },
       { name: "iFM 경인방송", group: "지역", desc: "인천 · 경기", icon: "i", accent: "#8bd3ff", query: "stn=ifm" },
@@ -479,7 +478,6 @@
       "MBC FM4U": `${PROXY_BASE}?station=mbc-fm4u`,
       "MBC 올댓뮤직": `${PROXY_BASE}?station=mbc-chm`,
       "TBN 경인교통방송": `${PROXY_BASE}?station=tbn-gyeongin`,
-      "FEBC 서울극동방송": `${PROXY_BASE}?station=febc-seoul`,
       "EBS FM": "https://ebsonair.ebs.co.kr/fmradiofamilypc/familypc1m/playlist.m3u8",
       "YTN 라디오": "https://radiolive.ytn.co.kr/radio/_definst_/20211118_fmlive/playlist.m3u8",
       "TBS FM": "https://cdnfm.tbs.seoul.kr/tbs/_definst_/tbs_fm_web_360.smil/playlist.m3u8",
@@ -499,9 +497,6 @@
       "1fm": "24",
       "2fm": "25"
     };
-
-    const TBN_GYEONGIN_PRIMARY = "https://www.tbn.it.kr/gyeongin/myStream/playlist.m3u8";
-    const TBN_GYEONGIN_ALT = "https://5cc6beb04faf6.streamlock.net/gyeongin/myStream/playlist.m3u8";
 
     const groups = ["전체", ...Array.from(new Set(stations.map(s => s.group)))];
 
@@ -1069,6 +1064,23 @@
 
         hls.attachMedia(audio);
         setStatus("연결중");
+
+        const isMbcStation = station.group === "MBC";
+        if (isMbcStation) {
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            if (seq !== playSequence || currentHls !== hls) return;
+            const retryPlay = audio.play();
+            if (retryPlay && typeof retryPlay.then === "function") {
+              retryPlay
+                .then(() => {
+                  if (seq === playSequence) setStatus("재생중");
+                })
+                .catch(() => {
+                  if (seq === playSequence) setStatus("재생 준비");
+                });
+            }
+          });
+        }
 
         // 이 호출은 반드시 채널 클릭과 같은 사용자 제스처 안에서 실행한다.
         const playPromise = audio.play();
