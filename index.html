@@ -636,114 +636,102 @@
       throw lastError || new Error("STREAM_RESOLVE_FAILED");
     }
 
-    async function playResolvedUrl(url, seq) {
+    async function playDirectUrl(url, seq) {
       if (seq !== playSequence) return;
+      if (!isSafeStreamUrl(url)) throw new Error("UNSAFE_STREAM_URL");
 
       destroyHls();
       openLink.href = url;
-
-      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
-      const nativeHls = isHls &&
-        typeof audio.canPlayType === "function" &&
-        audio.canPlayType("application/vnd.apple.mpegurl") !== "";
-
-      if (nativeHls) {
-        audio.src = url;
-        audio.load();
-        await audio.play();
-        return;
-      }
-
-      if (isHls) {
-        const loaded = await ensureHlsLibrary();
-
-        if (loaded && window.Hls && Hls.isSupported()) {
-          await new Promise((resolve, reject) => {
-            const hls = new Hls({
-              enableWorker: true,
-              backBufferLength: 30
-            });
-            currentHls = hls;
-            let settled = false;
-            let recoveredNetwork = false;
-            let recoveredMedia = false;
-
-            const fail = (error) => {
-              if (settled) return;
-              settled = true;
-              if (currentHls === hls) {
-                try { hls.destroy(); } catch {}
-                currentHls = null;
-              }
-              reject(error);
-            };
-
-            hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-              if (seq !== playSequence) {
-                fail(new Error("STALE_PLAY_REQUEST"));
-                return;
-              }
-              hls.loadSource(url);
-            });
-
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              if (seq !== playSequence) {
-                fail(new Error("STALE_PLAY_REQUEST"));
-                return;
-              }
-
-              audio.play().then(() => {
-                if (!settled) {
-                  settled = true;
-                  resolve();
-                }
-              }).catch(fail);
-            });
-
-            hls.on(Hls.Events.ERROR, (_event, data) => {
-              if (!data || !data.fatal || settled) return;
-
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !recoveredNetwork) {
-                recoveredNetwork = true;
-                try {
-                  hls.startLoad();
-                  return;
-                } catch {}
-              }
-
-              if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !recoveredMedia) {
-                recoveredMedia = true;
-                try {
-                  hls.recoverMediaError();
-                  return;
-                } catch {}
-              }
-
-              fail(new Error("HLS_FATAL_ERROR"));
-            });
-
-            hls.attachMedia(audio);
-          });
-          return;
-        }
-      }
-
       audio.src = url;
       audio.load();
+
+      // 중요: 안드로이드에서 검증된 기존 방식.
+      // 브라우저의 미디어 플레이어가 리다이렉트/HLS를 직접 처리하게 한다.
       await audio.play();
+    }
+
+    async function playWithHlsJs(url, seq) {
+      if (seq !== playSequence) return;
+
+      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
+      if (!isHls) throw new Error("NOT_HLS");
+
+      const loaded = await ensureHlsLibrary();
+      if (!loaded || !window.Hls || !Hls.isSupported()) {
+        throw new Error("HLS_JS_UNAVAILABLE");
+      }
+
+      await new Promise((resolve, reject) => {
+        const hls = new Hls({
+          enableWorker: true,
+          backBufferLength: 30
+        });
+        currentHls = hls;
+        let settled = false;
+        let recoveredNetwork = false;
+        let recoveredMedia = false;
+
+        const fail = (error) => {
+          if (settled) return;
+          settled = true;
+          if (currentHls === hls) {
+            try { hls.destroy(); } catch {}
+            currentHls = null;
+          }
+          reject(error);
+        };
+
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          if (seq !== playSequence) {
+            fail(new Error("STALE_PLAY_REQUEST"));
+            return;
+          }
+          hls.loadSource(url);
+        });
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (seq !== playSequence) {
+            fail(new Error("STALE_PLAY_REQUEST"));
+            return;
+          }
+
+          audio.play().then(() => {
+            if (!settled) {
+              settled = true;
+              resolve();
+            }
+          }).catch(fail);
+        });
+
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (!data || !data.fatal || settled) return;
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !recoveredNetwork) {
+            recoveredNetwork = true;
+            try {
+              hls.startLoad();
+              return;
+            } catch {}
+          }
+
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !recoveredMedia) {
+            recoveredMedia = true;
+            try {
+              hls.recoverMediaError();
+              return;
+            } catch {}
+          }
+
+          fail(new Error("HLS_FATAL_ERROR"));
+        });
+
+        hls.attachMedia(audio);
+      });
     }
 
     async function playLegacyFallback(seq) {
       if (!selected || seq !== playSequence) return;
-
-      destroyHls();
-      const legacyUrl = legacyStreamUrl(selected);
-      if (!isSafeStreamUrl(legacyUrl)) throw new Error("UNSAFE_LEGACY_URL");
-
-      openLink.href = legacyUrl;
-      audio.src = legacyUrl;
-      audio.load();
-      await audio.play();
+      await playDirectUrl(legacyStreamUrl(selected), seq);
     }
 
     function showToast(message) {
@@ -829,31 +817,55 @@
       abortResolve();
       clearAudioSource();
 
+      // 1순위: 처음부터 안드로이드에서 잘 사용하던 직접 재생 방식
       try {
         setStatus("연결중");
-        const resolvedUrl = await resolveStreamUrl(selected);
-        if (seq !== playSequence) return;
-
-        await playResolvedUrl(resolvedUrl, seq);
+        await playDirectUrl(legacyStreamUrl(selected), seq);
         if (seq !== playSequence) return;
         setStatus("재생중");
+        return;
       } catch {
         if (seq !== playSequence) return;
-
-        try {
-          setStatus("보조 연결중");
-          await playLegacyFallback(seq);
-          if (seq !== playSequence) return;
-          setStatus("재생중 · 보조");
-          showToast("새 연결 방식이 실패해 기존 연결 방식으로 재생했습니다.");
-        } catch {
-          if (seq !== playSequence) return;
-          setStatus(navigator.onLine ? "재생 실패" : "오프라인");
-          showToast(navigator.onLine
-            ? "현재 중계 서버 또는 방송 스트림에 연결할 수 없습니다."
-            : "인터넷 연결을 확인해 주세요.");
-        }
       }
+
+      let resolvedUrl = null;
+
+      // 2순위: 중계 서버의 최신/이전 JSON API에서 실제 주소를 받아
+      // HLS.js를 거치지 않고 브라우저 미디어 플레이어로 직접 재생
+      try {
+        setStatus("대체 연결중");
+        resolvedUrl = await resolveStreamUrl(selected);
+        if (seq !== playSequence) return;
+
+        await playDirectUrl(resolvedUrl, seq);
+        if (seq !== playSequence) return;
+        setStatus("재생중 · 대체");
+        return;
+      } catch {
+        if (seq !== playSequence) return;
+      }
+
+      // 3순위: 직접 재생까지 실패한 HLS 주소에만 HLS.js 사용
+      try {
+        if (!resolvedUrl) {
+          resolvedUrl = await resolveStreamUrl(selected);
+        }
+        if (seq !== playSequence) return;
+
+        setStatus("HLS 보조 연결중");
+        clearAudioSource();
+        await playWithHlsJs(resolvedUrl, seq);
+        if (seq !== playSequence) return;
+        setStatus("재생중 · HLS");
+        return;
+      } catch {
+        if (seq !== playSequence) return;
+      }
+
+      setStatus(navigator.onLine ? "재생 실패" : "오프라인");
+      showToast(navigator.onLine
+        ? "현재 중계 서버 또는 방송 스트림에 연결할 수 없습니다."
+        : "인터넷 연결을 확인해 주세요.");
     }
 
     function stopAudio() {
@@ -890,7 +902,7 @@
     audio.addEventListener("waiting", () => setStatus("버퍼링"));
     audio.addEventListener("pause", () => setStatus("일시정지"));
     audio.addEventListener("error", () => {
-      if (statusEl.textContent === "연결중" || statusEl.textContent === "보조 연결중") return;
+      if (["연결중", "대체 연결중", "HLS 보조 연결중", "보조 연결중"].includes(statusEl.textContent)) return;
       setStatus(navigator.onLine ? "오류" : "오프라인");
     });
 
