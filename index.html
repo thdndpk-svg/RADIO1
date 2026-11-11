@@ -1015,14 +1015,14 @@
 
     function startImmediateChannelPlayback(station) {
       const seq = ++playSequence;
-      const url = legacyStreamUrl(station);
-      openLink.href = url;
 
       destroyHls();
       audio.pause();
       audio.removeAttribute("src");
       audio.load();
 
+      // 안드로이드 Chrome: 사용자 터치가 살아 있는 동안 HLS MediaSource와 play()를 먼저 활성화한다.
+      // 실제 방송 URL은 이미 시작된 preparePromise가 끝나는 즉시 같은 HLS 인스턴스에 넣는다.
       if (window.Hls && Hls.isSupported()) {
         const hls = new Hls();
         currentHls = hls;
@@ -1047,10 +1047,59 @@
           setStatus("재생 준비");
         });
 
-        hls.loadSource(url);
         hls.attachMedia(audio);
         setStatus("연결중");
 
+        // 이 호출은 반드시 채널 클릭과 같은 사용자 제스처 안에서 실행한다.
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          playPromise
+            .then(() => {
+              if (seq === playSequence) setStatus("재생중");
+            })
+            .catch(() => {
+              // URL 로드 전 NotAllowed/NotSupported가 나더라도 HLS 준비는 계속 진행한다.
+              if (seq === playSequence) setStatus("연결중");
+            });
+        }
+
+        const loadPreparedUrl = async () => {
+          try {
+            let url = null;
+
+            if (preparedStreamUrl && preparedStationName === station.name) {
+              url = preparedStreamUrl;
+            } else if (preparePromise) {
+              await preparePromise;
+              if (preparedStreamUrl && preparedStationName === station.name) {
+                url = preparedStreamUrl;
+              }
+            } else {
+              url = await prepareStationStream(station);
+            }
+
+            if (seq !== playSequence || currentHls !== hls) return;
+            if (!url || !isSafeStreamUrl(url)) throw new Error("INVALID_PREPARED_URL");
+
+            openLink.href = url;
+            hls.loadSource(url);
+          } catch {
+            if (seq === playSequence && currentHls === hls) {
+              setStatus("재생 준비");
+            }
+          }
+        };
+
+        loadPreparedUrl();
+        return;
+      }
+
+      // 네이티브 HLS 기기에서는 준비된 URL이 이미 있으면 즉시 사용한다.
+      if (preparedStreamUrl && preparedStationName === station.name) {
+        openLink.href = preparedStreamUrl;
+        audio.src = preparedStreamUrl;
+        audio.load();
+        setStatus("연결중");
         const playPromise = audio.play();
         if (playPromise && typeof playPromise.then === "function") {
           playPromise
@@ -1061,22 +1110,8 @@
               if (seq === playSequence) setStatus("재생 준비");
             });
         }
-        return;
-      }
-
-      audio.src = url;
-      audio.load();
-      setStatus("연결중");
-
-      const playPromise = audio.play();
-      if (playPromise && typeof playPromise.then === "function") {
-        playPromise
-          .then(() => {
-            if (seq === playSequence) setStatus("재생중");
-          })
-          .catch(() => {
-            if (seq === playSequence) setStatus("재생 준비");
-          });
+      } else {
+        setStatus("재생 준비");
       }
     }
 
