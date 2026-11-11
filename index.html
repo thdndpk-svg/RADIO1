@@ -423,8 +423,20 @@
   <div class="toast" id="toast"></div>
 
   <script>
-    const BASE = "https://radio.bsod.kr/stream/";
-    const PLAYER_BASE = "https://radio.bsod.kr/stream/player.html";
+    const PROVIDER_ORIGIN = "https://radio.bsod.kr";
+    const API_BASE = `${PROVIDER_ORIGIN}/api/url`;
+    const LEGACY_BASE = `${PROVIDER_ORIGIN}/stream/`;
+    const RESOLVE_TIMEOUT_MS = 8000;
+    const HLS_LOAD_TIMEOUT_MS = 6000;
+    const HLS_CDNS = [
+      "https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js",
+      "https://unpkg.com/hls.js@1.7.3/dist/hls.min.js"
+    ];
+
+    let currentHls = null;
+    let resolveController = null;
+    let hlsLoadPromise = null;
+    let playSequence = 0;
 
     const stations = [
       { name: "KBS 1라디오", group: "KBS", desc: "뉴스 · 시사 · 교양", icon: "K1", accent: "#ffd479", query: "stn=kbs&ch=1radio" },
@@ -476,12 +488,262 @@
     let selected = null;
     let activeGroup = "전체";
 
-    function streamUrl(station) {
-      return `${BASE}?${station.query}`;
+    function apiUrl(station) {
+      return `${API_BASE}?${station.query}`;
     }
 
-    function playerUrl(station) {
-      return `${PLAYER_BASE}?${station.query}`;
+    function legacyJsonUrl(station) {
+      return `${LEGACY_BASE}?${station.query}&format=json`;
+    }
+
+    function legacyStreamUrl(station) {
+      return `${LEGACY_BASE}?${station.query}`;
+    }
+
+    function isSafeStreamUrl(value) {
+      try {
+        const url = new URL(value);
+        if (!["https:", "http:"].includes(url.protocol)) return false;
+        if (url.username || url.password) return false;
+        if (location.protocol === "https:" && url.protocol !== "https:") return false;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function destroyHls() {
+      if (currentHls) {
+        try { currentHls.destroy(); } catch {}
+        currentHls = null;
+      }
+    }
+
+    function abortResolve() {
+      if (resolveController) {
+        try { resolveController.abort(); } catch {}
+        resolveController = null;
+      }
+    }
+
+    function clearAudioSource() {
+      destroyHls();
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const existing = Array.from(document.scripts).find(script => script.src === url);
+        if (existing && window.Hls) {
+          resolve();
+          return;
+        }
+
+        const script = document.createElement("script");
+        const timer = setTimeout(() => {
+          script.remove();
+          reject(new Error("HLS_SCRIPT_TIMEOUT"));
+        }, HLS_LOAD_TIMEOUT_MS);
+
+        script.src = url;
+        script.async = true;
+        script.crossOrigin = "anonymous";
+        script.referrerPolicy = "no-referrer";
+
+        script.onload = () => {
+          clearTimeout(timer);
+          if (window.Hls) resolve();
+          else reject(new Error("HLS_GLOBAL_MISSING"));
+        };
+
+        script.onerror = () => {
+          clearTimeout(timer);
+          script.remove();
+          reject(new Error("HLS_SCRIPT_LOAD_FAILED"));
+        };
+
+        document.head.appendChild(script);
+      });
+    }
+
+    async function ensureHlsLibrary() {
+      if (window.Hls) return true;
+      if (hlsLoadPromise) return hlsLoadPromise;
+
+      hlsLoadPromise = (async () => {
+        for (const url of HLS_CDNS) {
+          try {
+            await loadScript(url);
+            if (window.Hls) return true;
+          } catch {}
+        }
+        return false;
+      })();
+
+      try {
+        return await hlsLoadPromise;
+      } finally {
+        hlsLoadPromise = null;
+      }
+    }
+
+    async function fetchJsonStreamUrl(url) {
+      abortResolve();
+      const controller = new AbortController();
+      resolveController = controller;
+      const timer = setTimeout(() => controller.abort(), RESOLVE_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(url, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          cache: "no-store",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(`STREAM_API_HTTP_${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data || typeof data.url !== "string" || !isSafeStreamUrl(data.url)) {
+          throw new Error("INVALID_STREAM_URL");
+        }
+
+        return data.url;
+      } finally {
+        clearTimeout(timer);
+        if (resolveController === controller) resolveController = null;
+      }
+    }
+
+    async function resolveStreamUrl(station) {
+      const endpoints = [apiUrl(station), legacyJsonUrl(station)];
+      let lastError = null;
+
+      for (const endpoint of endpoints) {
+        try {
+          return await fetchJsonStreamUrl(endpoint);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      throw lastError || new Error("STREAM_RESOLVE_FAILED");
+    }
+
+    async function playResolvedUrl(url, seq) {
+      if (seq !== playSequence) return;
+
+      destroyHls();
+      openLink.href = url;
+
+      const isHls = /\.m3u8(?:$|[?#])/i.test(url);
+      const nativeHls = isHls &&
+        typeof audio.canPlayType === "function" &&
+        audio.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+      if (nativeHls) {
+        audio.src = url;
+        audio.load();
+        await audio.play();
+        return;
+      }
+
+      if (isHls) {
+        const loaded = await ensureHlsLibrary();
+
+        if (loaded && window.Hls && Hls.isSupported()) {
+          await new Promise((resolve, reject) => {
+            const hls = new Hls({
+              enableWorker: true,
+              backBufferLength: 30
+            });
+            currentHls = hls;
+            let settled = false;
+            let recoveredNetwork = false;
+            let recoveredMedia = false;
+
+            const fail = (error) => {
+              if (settled) return;
+              settled = true;
+              if (currentHls === hls) {
+                try { hls.destroy(); } catch {}
+                currentHls = null;
+              }
+              reject(error);
+            };
+
+            hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+              if (seq !== playSequence) {
+                fail(new Error("STALE_PLAY_REQUEST"));
+                return;
+              }
+              hls.loadSource(url);
+            });
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              if (seq !== playSequence) {
+                fail(new Error("STALE_PLAY_REQUEST"));
+                return;
+              }
+
+              audio.play().then(() => {
+                if (!settled) {
+                  settled = true;
+                  resolve();
+                }
+              }).catch(fail);
+            });
+
+            hls.on(Hls.Events.ERROR, (_event, data) => {
+              if (!data || !data.fatal || settled) return;
+
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !recoveredNetwork) {
+                recoveredNetwork = true;
+                try {
+                  hls.startLoad();
+                  return;
+                } catch {}
+              }
+
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !recoveredMedia) {
+                recoveredMedia = true;
+                try {
+                  hls.recoverMediaError();
+                  return;
+                } catch {}
+              }
+
+              fail(new Error("HLS_FATAL_ERROR"));
+            });
+
+            hls.attachMedia(audio);
+          });
+          return;
+        }
+      }
+
+      audio.src = url;
+      audio.load();
+      await audio.play();
+    }
+
+    async function playLegacyFallback(seq) {
+      if (!selected || seq !== playSequence) return;
+
+      destroyHls();
+      const legacyUrl = legacyStreamUrl(selected);
+      if (!isSafeStreamUrl(legacyUrl)) throw new Error("UNSAFE_LEGACY_URL");
+
+      openLink.href = legacyUrl;
+      audio.src = legacyUrl;
+      audio.load();
+      await audio.play();
     }
 
     function showToast(message) {
@@ -538,71 +800,103 @@
     }
 
     async function selectStation(station, autoplay = true) {
+      playSequence++;
+      abortResolve();
+      clearAudioSource();
+
       selected = station;
       nowTitle.textContent = station.name;
       nowMeta.textContent = `${station.group} · ${station.desc}`;
-      openLink.href = playerUrl(station);
+      openLink.href = legacyStreamUrl(station);
       fallbackFrame.classList.remove("show");
       fallbackFrame.removeAttribute("src");
-
-      audio.src = streamUrl(station);
-      audio.load();
       localStorage.setItem("lastStation", station.name);
 
       renderStations();
       setStatus("선택됨");
 
       if (autoplay) {
-        try {
-          setStatus("연결중");
-          await audio.play();
-          setStatus("재생중");
-        } catch (err) {
-          setStatus("재생 대기");
-          showToast("휴대폰 정책상 재생 버튼을 한 번 더 눌러야 할 수 있어요.");
-        }
+        await playSelected();
       }
     }
 
     async function playSelected() {
       if (!selected) {
-        selectStation(stations[0], false);
+        await selectStation(stations[0], false);
       }
+
+      const seq = ++playSequence;
+      abortResolve();
+      clearAudioSource();
 
       try {
         setStatus("연결중");
-        await audio.play();
+        const resolvedUrl = await resolveStreamUrl(selected);
+        if (seq !== playSequence) return;
+
+        await playResolvedUrl(resolvedUrl, seq);
+        if (seq !== playSequence) return;
         setStatus("재생중");
-      } catch (err) {
-        setStatus("재생 실패");
-        showToast("재생이 안 되면 새창 플레이어나 보조재생을 눌러주세요.");
+      } catch {
+        if (seq !== playSequence) return;
+
+        try {
+          setStatus("보조 연결중");
+          await playLegacyFallback(seq);
+          if (seq !== playSequence) return;
+          setStatus("재생중 · 보조");
+          showToast("새 연결 방식이 실패해 기존 연결 방식으로 재생했습니다.");
+        } catch {
+          if (seq !== playSequence) return;
+          setStatus(navigator.onLine ? "재생 실패" : "오프라인");
+          showToast(navigator.onLine
+            ? "현재 중계 서버 또는 방송 스트림에 연결할 수 없습니다."
+            : "인터넷 연결을 확인해 주세요.");
+        }
       }
     }
 
     function stopAudio() {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      playSequence++;
+      abortResolve();
+      clearAudioSource();
       setStatus("정지");
     }
 
-    function showFallback() {
+    async function showFallback() {
       if (!selected) {
         showToast("먼저 채널을 선택하세요.");
         return;
       }
 
-      fallbackFrame.src = playerUrl(selected);
-      fallbackFrame.classList.add("show");
-      showToast("보조 플레이어를 열었습니다.");
+      const seq = ++playSequence;
+      abortResolve();
+      clearAudioSource();
+
+      try {
+        setStatus("보조 연결중");
+        await playLegacyFallback(seq);
+        if (seq !== playSequence) return;
+        setStatus("재생중 · 보조");
+        showToast("기존 연결 방식으로 재생 중입니다.");
+      } catch {
+        if (seq !== playSequence) return;
+        setStatus("보조재생 실패");
+        showToast("보조 연결도 실패했습니다. 잠시 후 다시 시도해 주세요.");
+      }
     }
 
     audio.addEventListener("playing", () => setStatus("재생중"));
     audio.addEventListener("waiting", () => setStatus("버퍼링"));
     audio.addEventListener("pause", () => setStatus("일시정지"));
     audio.addEventListener("error", () => {
-      setStatus("오류");
-      showToast("이 채널은 현재 브라우저에서 바로 재생이 안 될 수 있어요.");
+      if (statusEl.textContent === "연결중" || statusEl.textContent === "보조 연결중") return;
+      setStatus(navigator.onLine ? "오류" : "오프라인");
+    });
+
+    window.addEventListener("offline", () => setStatus("오프라인"));
+    window.addEventListener("online", () => {
+      if (selected && audio.paused) setStatus("재생 대기");
     });
 
     playBtn.addEventListener("click", playSelected);
@@ -619,7 +913,7 @@
     if (last) {
       selectStation(last, false);
     } else {
-      openLink.href = "#";
+      openLink.href = PROVIDER_ORIGIN;
     }
 
     /* 수정 완료:
