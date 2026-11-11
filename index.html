@@ -493,6 +493,9 @@
       "2fm": "25"
     };
 
+    const TBN_GYEONGIN_PRIMARY = "https://www.tbn.it.kr/gyeongin/myStream/playlist.m3u8";
+    const TBN_GYEONGIN_ALT = "https://5cc6beb04faf6.streamlock.net/gyeongin/myStream/playlist.m3u8";
+
     const groups = ["전체", ...Array.from(new Set(stations.map(s => s.group)))];
 
     const audio = document.getElementById("audio");
@@ -908,14 +911,24 @@
       const params = new URLSearchParams(station.query);
       const stn = params.get("stn");
 
-      // MBC는 토큰 만료 문제가 있으므로 방송사 직접 URL을 먼저 받는다.
+      // MBC는 토큰형 스트림이라 중계 서버의 오래된 캐시를 재사용하면 만료될 수 있다.
+      // getUrlCached()의 캐시 키에 bora가 포함되므로 매 선택마다 다른 값으로 새 URL을 발급받는다.
       if (stn === "mbc") {
         try {
-          const directUrl = await resolveBroadcasterDirect(station);
-          preparedStreamUrl = directUrl;
+          const freshMbcUrl = await fetchJsonStreamUrl(
+            `${API_BASE}?${station.query}&bora=sbm-${Date.now()}`
+          );
+          preparedStreamUrl = freshMbcUrl;
           preparedStationName = station.name;
-          return directUrl;
+          return freshMbcUrl;
         } catch {}
+      }
+
+      // TBN 경인은 HTTPS 주소를 우선 사용하고, 재생 오류 시 보조 HTTPS 주소로 자동 전환한다.
+      if (station.name === "TBN 경인교통방송") {
+        preparedStreamUrl = TBN_GYEONGIN_PRIMARY;
+        preparedStationName = station.name;
+        return TBN_GYEONGIN_PRIMARY;
       }
 
       try {
@@ -1027,8 +1040,22 @@
         const hls = new Hls();
         currentHls = hls;
 
+        let tbnAltTried = false;
+
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (!data || !data.fatal || currentHls !== hls || seq !== playSequence) return;
+
+          if (station.name === "TBN 경인교통방송" && !tbnAltTried) {
+            tbnAltTried = true;
+            preparedStreamUrl = TBN_GYEONGIN_ALT;
+            preparedStationName = station.name;
+            openLink.href = TBN_GYEONGIN_ALT;
+            try {
+              hls.loadSource(TBN_GYEONGIN_ALT);
+              setStatus("TBN 보조 연결중");
+              return;
+            } catch {}
+          }
 
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             try {
@@ -1124,11 +1151,28 @@
       nowTitle.textContent = station.name;
       nowMeta.textContent = `${station.group} · ${station.desc}`;
       openLink.href = legacyStreamUrl(station);
+      openLink.textContent = station.name === "FEBC 서울극동방송"
+        ? "극동방송 외부재생"
+        : "새창 플레이어";
       fallbackFrame.classList.remove("show");
       fallbackFrame.removeAttribute("src");
       localStorage.setItem("lastStation", station.name);
 
       renderStations();
+
+      // 서울 극동방송의 현재 공개 스트림은 HTTP뿐이라 HTTPS GitHub 앱 내부에서는 혼합 콘텐츠로 차단된다.
+      // HTTPS 중계 주소를 새 창으로 열어 브라우저가 외부 스트림으로 이동하도록 한다.
+      if (station.name === "FEBC 서울극동방송") {
+        preparedStreamUrl = null;
+        preparedStationName = null;
+        preparePromise = null;
+        setStatus("외부재생");
+        if (autoplay) {
+          showToast("서울 극동방송은 아래 '극동방송 외부재생' 버튼으로 들어주세요.");
+        }
+        return;
+      }
+
       setStatus("주소 확인중");
 
       preparePromise = prepareStationStream(station)
